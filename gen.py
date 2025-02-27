@@ -7,29 +7,30 @@ import unicodedata
 import re
 import typing
 
-
-EMPTY_CELL = object()    # FIXME: use a better sentinel object
+BLOCK = '\N{BLACK SQUARE}'
+EMPTY = '\N{WHITE SQUARE}'
 
 
 class Grid:
-    def __init__(self, data: typing.Iterable[typing.Iterable], default=None):
+    def __init__(self, data: typing.Iterable[typing.Iterable], dimensions=None,
+                 default=None, *, error_out_of_bounds=True):
         if isinstance(data, Grid):
             data = data.data
         self.data = [list(r) for r in data]
-
-    @property
-    def width(self):
-        return len(self.data[0])
-
-    @property
-    def height(self):
-        return len(self.data)
+        if dimensions is None:
+            dimensions = (len(self.data[0]), len(self.data))
+        self.width, self.height = dimensions
+        self.dimensions = dimensions
+        self.error_out_of_bounds = error_out_of_bounds
 
     def __getitem__(self, pos):
         if isinstance(pos, tuple):
-            x, y = pos
-            if 0 <= x < self.width and 0 <= y < self.height:
+            if pos in self:
+                x, y = pos
                 return self.data[y][x]
+            elif self.error_out_of_bounds:
+                raise IndexError(
+                    f'{pos} not in grid of dimensions {self.dimensions}')
             return None
         elif isinstance(pos, slice):
             x0, y0 = pos.start or (0, 0)
@@ -58,16 +59,38 @@ class Grid:
             self.data[y][x] = value
         elif isinstance(pos, slice):
             x0, y0 = pos.start or (0, 0)
-            x1, y1 = pos.stop or (0, 0)
+            x1, y1 = pos.stop or (self.width - 1, self.height - 1)
             x1 += 1
             y1 += 1
             if pos.step:
                 raise NotImplementedError('slices with steps unsupported')
 
-            for y, i in zip(range(y0, y1), range(y1 - y0)):
-                self.data[y][x0:x1] = value[i]
+            if self.error_out_of_bounds and (x1 > self.width
+                                             or y1 > self.height):
+                print((x1, y1), self.width, self.height)
+                raise ValueError(
+                    f'slice {pos} does not fit in grid of dimensions '
+                    f'{self.dimensions}'
+                )
+            w = x1 - x0
+            h = y1 - y0
+
+            if self.error_out_of_bounds and len(value) != h:
+                raise ValueError(
+                    f'value {value} is not of the right size for slice {pos}')
+
+            for y, raw_row in zip(range(y0, y1), reversed(value)):
+                row = list(raw_row)
+                if len(raw_row) > w:
+                    if self.error_out_of_bounds:
+                        raise ValueError(
+                            f'row {raw_row} does not fit in slice {pos}')
+                    else:
+                        row = row[:w]
+
+                self.data[y][x0:x1] = row
         else:
-            self.data[pos] = value
+            self.data[pos] = list(value)
 
     def __len__(self):
         return len(self.data)
@@ -87,12 +110,24 @@ class Grid:
             f = '\n'.join(f'    {line}' for line in lines)
             return f'{self.__class__.__qualname__}(\n{f}\n)'
 
+    def __contains__(self, point):
+        x, y = point
+        return 0 <= point[0] < self.width and 0 <= point[1] < self.height
+
     def set_if_not_none(self, pos, value):
+        if pos not in self:
+            if self.error_out_of_bounds:
+                raise ValueError(
+                    f'pos {pos} not in grid of dimensions {self.dimensions}')
+            else:
+                return
+
         if self[pos] is not None:
             self[pos] = value
 
     def transpose(self):
-        return Grid(list(zip(*self.data)))
+        return Grid(list(zip(*self.data)),
+                    error_out_of_bounds=self.error_out_of_bounds)
 
     def neighbors(self, pos):
         x, y = pos
@@ -100,7 +135,7 @@ class Grid:
             self[c, r]
             for c, r in ((x - 1, y), (x + 1, y),
                          (x, y - 1), (x, y + 1))
-            if self[c, r] is not None
+            if (c, r) in self and self[c, r] is not None
         ]
 
 
@@ -136,7 +171,7 @@ class WordList:
         if len(start) == 0:
             return list(self)
         elif len(start) == 1:
-            return [w for d in self._words[start] for w in d.values()]
+            return list(self._words[start])
         l1, l2 = start[:2]
         return [w for w in self._words[l1][l2] if w.startswith(start)]
 
@@ -148,16 +183,23 @@ class WordList:
     def __len__(self):
         return self._length
 
+    def __contains__(self, word):
+        if len(word) < 2:
+            return False
+        l1, l2 = word[:2]
+        return word in self._words[l1][l2]
+
 
 def last_word_from_line(line):
     for c in range(len(line) - 1, -1, -1):
-        if line[c] is EMPTY_CELL or line[c] is None:
+        if line[c] in (EMPTY, BLOCK):
             return ''.join(line[c + 1:])
     return ''.join(line)
 
 
 def word_matches_vertically(wordlist, word, grid, pos):
-    words_x = range(pos[0], pos[0] + len(word) - 1)
+    print(f'--- Checking if {word=} matches vertically at {pos=}')
+    words_x = range(pos[0], pos[0] + len(word))
     y = pos[1]
     if y == 0:
         return True
@@ -166,16 +208,70 @@ def word_matches_vertically(wordlist, word, grid, pos):
         col = grid[(x, 0):(x, y - 1)]
         row = col.transpose()
         word = ''.join((last_word_from_line(row[0]), letter))
+        print(f'checking {word=} from column {x}')
         max_length = len(word) + max_additional_length
 
         if not any(len(w) <= max_length for w in wordlist.starting_with(word)):
+            print('--- No :-(')
             # FIXME: cache correct words
             return False
+    print('--- Yes X-)')
     return True
 
 
-def list_correct_words(wordlist, grid, start_pos, end_pos):
+def iter_correct_words(wordlist, grid, start_pos, end_pos):
     wl = list(wordlist)
     random.shuffle(wl)
     yield from (w for w in wl if len(w) <= end_pos[0] + 1 - start_pos[0]
                 and word_matches_vertically(wordlist, w, grid, start_pos))
+
+
+def generate_grid(wordlist, dimensions):
+    random.seed(42)
+    width, height = dimensions
+    grid = Grid([[EMPTY for _ in range(width)] for _ in range(height)])
+    x, y = (0, 0)
+    stack = []
+    wl = list(wordlist)
+    random.shuffle(wl)
+    correct_words = iter(wl)
+    print('=== Grid:')
+    print(grid)
+    while y < height:
+        try:
+            word = next(correct_words)
+        except StopIteration:
+            print('=== Going back to previous state')
+            grid, correct_words, (x, y) = stack.pop()
+        else:
+            print(f'=== Trying word: {word}')
+            stack.append((Grid(grid), correct_words, (x, y)))
+            end_x = x + len(word) - 1
+            print(f'{x=} {y=} {end_x=} {word=}')
+            print(f'{grid[(x, y):(end_x, y)]=}')
+            grid[(x, y):(end_x, y)] = (word,)
+            if end_x < width - 1:
+                # Adding BLOCK on next cell and advancing two cells
+                grid[(end_x + 1, y)] = BLOCK
+                x = end_x + 2
+            else:
+                # end_x == width - 1, the word ends the line, let's continue
+                # with the next line
+                x = 0
+                y += 1
+                print('=== Going to next line')
+            correct_words = iter_correct_words(
+                wordlist, grid, (x, y), (width - 1, y))
+        print('=== Grid:')
+        print(grid)
+    return grid
+
+
+if __name__ == '__main__':
+    import sys
+    wordlist_file = sys.argv[1]
+    width = int(sys.argv[2])
+    height = int(sys.argv[3])
+    wordlist = WordList(wordlist_file, width)
+    grid = generate_grid(wordlist, (width, height))
+    print(grid)
