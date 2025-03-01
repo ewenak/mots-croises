@@ -1,11 +1,14 @@
 #! /usr/bin/env python3
 
+import logging
 import os
 import random
-import string
-import unicodedata
 import re
+import string
 import typing
+import unicodedata
+
+logger = logging.getLogger(__name__)
 
 BLOCK = '\N{BLACK SQUARE}'
 EMPTY = '\N{WHITE SQUARE}'
@@ -13,7 +16,16 @@ EMPTY = '\N{WHITE SQUARE}'
 
 class Grid:
     def __init__(self, data: typing.Iterable[typing.Iterable], dimensions=None,
-                 default=None, *, error_out_of_bounds=True):
+                 default=None, *, error_out_of_bounds=True, _trust_args=False):
+        if _trust_args:
+            # Bypass args processing, as we're called from an internal method.
+            # Will be faster, thanks to not doing list(r) for r in data
+            self.data = data
+            self.dimensions = dimensions
+            self.width, self.height = dimensions
+            self.error_out_of_bounds = error_out_of_bounds
+            return
+
         if isinstance(data, Grid):
             data = data.data
         self.data = [list(r) for r in data]
@@ -49,7 +61,11 @@ class Grid:
             if pos.step:
                 raise NotImplementedError('slices with steps unsupported')
 
-            return Grid(self[y][x0:x1] for y in range(y0, y1))
+            return Grid(
+                [self[y][x0:x1] for y in range(y0, y1)],
+                dimensions=(x1 - x0, y1 - y0),
+                error_out_of_bounds=self.error_out_of_bounds, _trust_args=True
+            )
 
         return self.data[pos]
 
@@ -67,7 +83,6 @@ class Grid:
 
             if self.error_out_of_bounds and (x1 > self.width
                                              or y1 > self.height):
-                print((x1, y1), self.width, self.height)
                 raise ValueError(
                     f'slice {pos} does not fit in grid of dimensions '
                     f'{self.dimensions}'
@@ -126,8 +141,11 @@ class Grid:
             self[pos] = value
 
     def transpose(self):
-        return Grid(list(zip(*self.data)),
-                    error_out_of_bounds=self.error_out_of_bounds)
+        return Grid(
+            [list(r) for r in zip(*self.data)],
+            dimensions=(self.height, self.width),
+            error_out_of_bounds=self.error_out_of_bounds, _trust_args=True
+        )
 
     def neighbors(self, pos):
         x, y = pos
@@ -198,7 +216,8 @@ def last_word_from_line(line):
 
 
 def word_matches_vertically(wordlist, word, grid, pos):
-    print(f'--- Checking if {word=} matches vertically at {pos=}')
+    logger.debug('--- Checking if word=%s matches vertically at pos=%s',
+                 word, pos)
     words_x = range(pos[0], pos[0] + len(word))
     y = pos[1]
     if y == 0:
@@ -208,14 +227,14 @@ def word_matches_vertically(wordlist, word, grid, pos):
         col = grid[(x, 0):(x, y - 1)]
         row = col.transpose()
         word = ''.join((last_word_from_line(row[0]), letter))
-        print(f'checking {word=} from column {x}')
+        logger.debug('checking word=%s from column %d', word, x)
         max_length = len(word) + max_additional_length
 
         if not any(len(w) <= max_length for w in wordlist.starting_with(word)):
-            print('--- No :-(')
+            logger.debug('--- No :-(')
             # FIXME: cache correct words
             return False
-    print('--- Yes X-)')
+    logger.debug('--- Yes X-)')
     return True
 
 
@@ -235,20 +254,18 @@ def generate_grid(wordlist, dimensions):
     wl = list(wordlist)
     random.shuffle(wl)
     correct_words = iter(wl)
-    print('=== Grid:')
-    print(grid)
+    logger.debug('=== Grid:\n%s', grid)
     while y < height:
         try:
             word = next(correct_words)
         except StopIteration:
-            print('=== Going back to previous state')
+            logger.debug('=== Going back to previous state')
             grid, correct_words, (x, y) = stack.pop()
         else:
-            print(f'=== Trying word: {word}')
+            logger.debug('=== Trying word: %s', word)
             stack.append((Grid(grid), correct_words, (x, y)))
             end_x = x + len(word) - 1
-            print(f'{x=} {y=} {end_x=} {word=}')
-            print(f'{grid[(x, y):(end_x, y)]=}')
+            logger.debug('x=%d y=%d end_x=%d word=%s', x, y, end_x, word)
             grid[(x, y):(end_x, y)] = (word,)
             if end_x < width - 1:
                 # Adding BLOCK on next cell and advancing two cells
@@ -259,16 +276,19 @@ def generate_grid(wordlist, dimensions):
                 # with the next line
                 x = 0
                 y += 1
-                print('=== Going to next line')
+                logger.debug('=== Going to next line')
             correct_words = iter_correct_words(
                 wordlist, grid, (x, y), (width - 1, y))
-        print('=== Grid:')
-        print(grid)
+        if logger.isEnabledFor(logging.DEBUG):
+            logger.debug('=== Grid:\n%s', grid)
+        else:
+            print(f'\033c=== Grid:\n{grid}')
     return grid
 
 
 if __name__ == '__main__':
     import sys
+    logging.basicConfig(level=logging.INFO)
     wordlist_file = sys.argv[1]
     width = int(sys.argv[2])
     height = int(sys.argv[3])
