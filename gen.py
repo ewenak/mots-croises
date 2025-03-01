@@ -161,17 +161,20 @@ class WordList:
     def __init__(self, words: os.PathLike | str | list, max_length=8):
         if isinstance(words, (os.PathLike, str)):
             with open(words, "r") as f:
-                words = [line.strip() for line in f.readlines()]
+                words = [
+                    word for line in f.readlines()
+                    if 2 <= len(word := self.clean(line.strip())) <= max_length
+                ]
+
+        random.shuffle(words)
+        self._length = len(words)
 
         self._words = {l1: {l2: [] for l2 in string.ascii_lowercase}
                        for l1 in string.ascii_lowercase}
-        self._length = 0
+        self._word_list = words
 
         for word in words:
-            w = self.clean(word)
-            if 2 <= len(w) <= max_length:
-                self._length += 1
-                self._words[w[0]][w[1]].append(w)
+            self._words[word[0]][word[1]].append(word)
 
     @staticmethod
     def clean(word):
@@ -194,9 +197,7 @@ class WordList:
         return [w for w in self._words[l1][l2] if w.startswith(start)]
 
     def __iter__(self):
-        for d in self._words.values():
-            for words in d.values():
-                yield from words
+        return iter(self._word_list)
 
     def __len__(self):
         return self._length
@@ -239,21 +240,16 @@ def word_matches_vertically(wordlist, word, grid, pos):
 
 
 def iter_correct_words(wordlist, grid, start_pos, end_pos):
-    wl = list(wordlist)
-    random.shuffle(wl)
-    yield from (w for w in wl if len(w) <= end_pos[0] + 1 - start_pos[0]
+    yield from (w for w in wordlist if len(w) <= end_pos[0] + 1 - start_pos[0]
                 and word_matches_vertically(wordlist, w, grid, start_pos))
 
 
 def generate_grid(wordlist, dimensions):
-    random.seed(42)
     width, height = dimensions
     grid = Grid([[EMPTY for _ in range(width)] for _ in range(height)])
     x, y = (0, 0)
     stack = []
-    wl = list(wordlist)
-    random.shuffle(wl)
-    correct_words = iter(wl)
+    correct_words = iter(wordlist)
     logger.debug('=== Grid:\n%s', grid)
     while y < height:
         try:
@@ -292,6 +288,7 @@ if __name__ == '__main__':
     wordlist_file = sys.argv[1]
     width = int(sys.argv[2])
     height = int(sys.argv[3])
+    random.seed(42)
     wordlist = WordList(wordlist_file, width)
     grid = generate_grid(wordlist, (width, height))
     print(grid)
