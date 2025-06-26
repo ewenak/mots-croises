@@ -254,6 +254,21 @@ class SolveAttempt:
                 and self.word_matches_vertically(w))
         )
 
+    def add_word(self, word):
+        end_x = self.x + len(word) - 1
+        logger.debug('x=%d y=%d end_x=%d word=%s', self.x, self.y, end_x, word)
+        self.grid[(self.x, self.y):(end_x, self.y)] = (word,)
+        if end_x < self.grid.width - 1:
+            # Adding BLOCK on next cell and advancing two cells
+            self.grid[(end_x + 1, self.y)] = BLOCK
+            self.x = end_x + 2
+        else:
+            # end_x == width - 1, the word ends the line, let's continue
+            # with the next line
+            self.x = 0
+            self.y += 1
+            logger.debug('=== Going to next line')
+
     def copy(self):
         return SolveAttempt(self.wordlist, Grid(self.grid), x=self.x, y=self.y)
 
@@ -275,24 +290,7 @@ def generate_grid(wordlist, dimensions):
             logger.debug('=== Trying word: %s', word)
             stack.append(solve_attempt)
             solve_attempt = solve_attempt.copy()
-            end_x = solve_attempt.x + len(word) - 1
-            logger.debug(
-                'x=%d y=%d end_x=%d word=%s',
-                solve_attempt.x, solve_attempt.y, end_x, word
-            )
-            solve_attempt.grid[
-                (solve_attempt.x, solve_attempt.y):(end_x, solve_attempt.y)
-            ] = (word,)
-            if end_x < width - 1:
-                # Adding BLOCK on next cell and advancing two cells
-                solve_attempt.grid[(end_x + 1, solve_attempt.y)] = BLOCK
-                solve_attempt.x = end_x + 2
-            else:
-                # end_x == width - 1, the word ends the line, let's continue
-                # with the next line
-                solve_attempt.x = 0
-                solve_attempt.y += 1
-                logger.debug('=== Going to next line')
+            solve_attempt.add_word(word)
         if logger.isEnabledFor(logging.DEBUG):
             logger.debug('=== Grid:\n%s', solve_attempt.grid)
         else:
