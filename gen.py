@@ -280,6 +280,9 @@ class SolveAttempt:
             # Adding BLOCK on next cell and advancing two cells
             self.grid[(end_x + 1, self.y)] = BLOCK
             self.x = end_x + 2
+            if self.x >= self.grid.width:
+                self.x = 0
+                self.y += 1
         else:
             # end_x == width - 1, the word ends the line, let's continue
             # with the next line
