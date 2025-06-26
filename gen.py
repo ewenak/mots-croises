@@ -5,6 +5,7 @@ import os
 import random
 import re
 import string
+import sys
 import typing
 import unicodedata
 
@@ -290,7 +291,7 @@ class SolveAttempt:
         return SolveAttempt(self.wordlist, Grid(self.grid), x=self.x, y=self.y)
 
 
-def generate_grid(wordlist, dimensions):
+def generate_grid(wordlist, width, height):
     attempt = SolveAttempt(
         wordlist,
         Grid([[EMPTY for _ in range(width)] for _ in range(height)])
@@ -299,12 +300,24 @@ def generate_grid(wordlist, dimensions):
 
 
 if __name__ == '__main__':
-    import sys
-    logging.basicConfig(level=logging.INFO)
-    wordlist_file = sys.argv[1]
-    width = int(sys.argv[2])
-    height = int(sys.argv[3])
+    import argparse
+
+    parser = argparse.ArgumentParser('Crossword generator')
+    parser.add_argument(
+        'wordlist', help='Wordlist file path (1 word per line)')
+    parser.add_argument('width', type=int, help='Grid width')
+    parser.add_argument('height', type=int, help='Grid height')
+    parser.add_argument('--debug', '-d', action=argparse.BooleanOptionalAction,
+                        help='Set logging level to logging.DEBUG')
+
+    args = parser.parse_args()
+
+    if args.debug:
+        logging.basicConfig(level=logging.DEBUG)
+    else:
+        logging.basicConfig(level=logging.INFO)
+
     random.seed(42)
-    wordlist = WordList(wordlist_file, width)
-    grid = generate_grid(wordlist, (width, height))
+    wordlist = WordList(args.wordlist, args.width)
+    grid = generate_grid(wordlist, args.width, args.height)
     print(grid)
