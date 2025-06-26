@@ -210,10 +210,11 @@ class WordList:
 
 
 class SolveAttempt:
-    def __init__(self, wordlist, grid, pos=(0, 0)):
+    def __init__(self, wordlist, grid, x=0, y=0):
         self.wordlist = wordlist
         self.grid = grid
-        self.pos = pos
+        self.x = x
+        self.y = y
         self.correct_words = self.iter_correct_words()
 
     def last_word_from_line(self, line):
@@ -224,14 +225,13 @@ class SolveAttempt:
 
     def word_matches_vertically(self, word):
         logger.debug('--- Checking if word=%s matches at pos=%s',
-                     word, self.pos)
-        words_x = range(self.pos[0], self.pos[0] + len(word))
-        y = self.pos[1]
-        if y == 0:
+                     word, (self.x, self.y))
+        words_x = range(self.x, self.x + len(word))
+        if self.y == 0:
             return True
-        max_additional_length = self.grid.height - y
+        max_additional_length = self.grid.height - self.y
         for x, letter in zip(words_x, word):
-            col = self.grid[(x, 0):(x, y - 1)]
+            col = self.grid[(x, 0):(x, self.y - 1)]
             row = col.transpose()
             word = ''.join((self.last_word_from_line(row[0]), letter))
             logger.debug('checking word=%s from column %d', word, x)
@@ -247,16 +247,15 @@ class SolveAttempt:
         logger.debug('--- Yes X-)')
         return True
 
-
     def iter_correct_words(self):
         yield from (
             w for w in self.wordlist
-            if (len(w) <= self.grid.width - self.pos[0]
+            if (len(w) <= self.grid.width - self.x
                 and self.word_matches_vertically(w))
         )
 
     def copy(self):
-        return SolveAttempt(self.wordlist, Grid(self.grid), self.pos)
+        return SolveAttempt(self.wordlist, Grid(self.grid), x=self.x, y=self.y)
 
 
 def generate_grid(wordlist, dimensions):
@@ -266,7 +265,7 @@ def generate_grid(wordlist, dimensions):
     del grid
     stack = []
     logger.debug('=== Grid:\n%s', solve_attempt.grid)
-    while solve_attempt.pos[1] < height:
+    while solve_attempt.y < height:
         try:
             word = next(solve_attempt.correct_words)
         except StopIteration:
@@ -276,21 +275,24 @@ def generate_grid(wordlist, dimensions):
             logger.debug('=== Trying word: %s', word)
             stack.append(solve_attempt)
             solve_attempt = solve_attempt.copy()
-            x, y = solve_attempt.pos
-            end_x = x + len(word) - 1
-            logger.debug('x=%d y=%d end_x=%d word=%s', x, y, end_x, word)
-            solve_attempt.grid[(x, y):(end_x, y)] = (word,)
+            end_x = solve_attempt.x + len(word) - 1
+            logger.debug(
+                'x=%d y=%d end_x=%d word=%s',
+                solve_attempt.x, solve_attempt.y, end_x, word
+            )
+            solve_attempt.grid[
+                (solve_attempt.x, solve_attempt.y):(end_x, solve_attempt.y)
+            ] = (word,)
             if end_x < width - 1:
                 # Adding BLOCK on next cell and advancing two cells
-                solve_attempt.grid[(end_x + 1, y)] = BLOCK
-                x = end_x + 2
+                solve_attempt.grid[(end_x + 1, solve_attempt.y)] = BLOCK
+                solve_attempt.x = end_x + 2
             else:
                 # end_x == width - 1, the word ends the line, let's continue
                 # with the next line
-                x = 0
-                y += 1
+                solve_attempt.x = 0
+                solve_attempt.y += 1
                 logger.debug('=== Going to next line')
-            solve_attempt.pos = (x, y)
         if logger.isEnabledFor(logging.DEBUG):
             logger.debug('=== Grid:\n%s', solve_attempt.grid)
         else:
