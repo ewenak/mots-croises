@@ -254,6 +254,23 @@ class SolveAttempt:
                 and self.word_matches_vertically(w))
         )
 
+    def recurse(self):
+        if self.y >= self.grid.height:
+            return self.grid
+        for word in self.correct_words:
+            logger.debug('Trying word: %s', word)
+            new = self.copy()
+            new.add_word(word)
+            if logger.isEnabledFor(logging.DEBUG):
+                logger.debug('=== Grid:\n%s', new.grid)
+            else:
+                print(f'\033c=== Grid:\n{new.grid}', file=sys.stderr)
+            grid = new.recurse()
+            if grid is not None:
+                return grid
+            logger.debug('Going back to previous state')
+        return None
+
     def add_word(self, word):
         end_x = self.x + len(word) - 1
         logger.debug('x=%d y=%d end_x=%d word=%s', self.x, self.y, end_x, word)
@@ -274,28 +291,11 @@ class SolveAttempt:
 
 
 def generate_grid(wordlist, dimensions):
-    width, height = dimensions
-    grid = Grid([[EMPTY for _ in range(width)] for _ in range(height)])
-    solve_attempt = SolveAttempt(wordlist, grid)
-    del grid
-    stack = []
-    logger.debug('=== Grid:\n%s', solve_attempt.grid)
-    while solve_attempt.y < height:
-        try:
-            word = next(solve_attempt.correct_words)
-        except StopIteration:
-            logger.debug('=== Going back to previous state')
-            solve_attempt = stack.pop()
-        else:
-            logger.debug('=== Trying word: %s', word)
-            stack.append(solve_attempt)
-            solve_attempt = solve_attempt.copy()
-            solve_attempt.add_word(word)
-        if logger.isEnabledFor(logging.DEBUG):
-            logger.debug('=== Grid:\n%s', solve_attempt.grid)
-        else:
-            print(f'\033c=== Grid:\n{solve_attempt.grid}')
-    return solve_attempt.grid
+    attempt = SolveAttempt(
+        wordlist,
+        Grid([[EMPTY for _ in range(width)] for _ in range(height)])
+    )
+    return attempt.recurse()
 
 
 if __name__ == '__main__':
