@@ -211,11 +211,19 @@ class WordList:
 
 
 class SolveAttempt:
-    def __init__(self, wordlist, grid, x=0, y=0):
+    def __init__(self, wordlist, grid, x=0, y=0, columns_correct_words=None):
         self.wordlist = wordlist
         self.grid = grid
         self.x = x
         self.y = y
+        if columns_correct_words is None:
+            self.columns_correct_words = [
+                set(wordlist) for _ in range(self.grid.width)
+            ]
+        else:
+            self.columns_correct_words = columns_correct_words
+        self.new_columns_correct_words = [set(words) for words in
+                                          self.columns_correct_words]
         self.correct_words = self.iter_correct_words()
 
     def last_word_from_line(self, line):
@@ -238,12 +246,16 @@ class SolveAttempt:
             logger.debug('checking word=%s from column %d', word, x)
             max_length = len(word) + max_additional_length
 
-            if not any(
-                len(w) <= max_length
-                for w in self.wordlist.starting_with(word)
-            ):
+            # New words need to be inherited by copied SolveAttempt, this
+            # SolveAttempt (self) will still use the current
+            # columns_correct_words for next word_matches_vertically call.
+            self.new_columns_correct_words[x] = {
+                w for w in self.columns_correct_words[x]
+                if len(w) <= max_length and w.startswith(word)
+            }
+            logger.debug('correct_words: %s', self.columns_correct_words[x])
+            if not self.new_columns_correct_words[x]:
                 logger.debug('--- No :-(')
-                # FIXME: cache correct words
                 return False
         logger.debug('--- Yes X-)')
         return True
@@ -279,6 +291,7 @@ class SolveAttempt:
         if end_x < self.grid.width - 1:
             # Adding BLOCK on next cell and advancing two cells
             self.grid[(end_x + 1, self.y)] = BLOCK
+            self.columns_correct_words[end_x + 1] = set(self.wordlist)
             self.x = end_x + 2
             if self.x >= self.grid.width:
                 self.x = 0
@@ -291,7 +304,8 @@ class SolveAttempt:
             logger.debug('=== Going to next line')
 
     def copy(self):
-        return SolveAttempt(self.wordlist, Grid(self.grid), x=self.x, y=self.y)
+        return SolveAttempt(self.wordlist, Grid(self.grid), x=self.x, y=self.y,
+                            columns_correct_words=self.new_columns_correct_words)
 
 
 def generate_grid(wordlist, width, height):
