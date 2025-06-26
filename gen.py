@@ -159,12 +159,15 @@ class Grid:
 
 
 class WordList:
-    def __init__(self, words: os.PathLike | str | list, max_length=8):
+    def __init__(self, words: os.PathLike | str | list, max_length=8,
+                 min_length=2):
         if isinstance(words, (os.PathLike, str)):
             with open(words, "r") as f:
                 words = [
                     word for line in f.readlines()
-                    if 2 <= len(word := self.clean(line.strip())) <= max_length
+                    if (min_length
+                        <= len(word := self.clean(line.strip()))
+                        <= max_length)
                 ]
 
         random.shuffle(words)
@@ -324,6 +327,12 @@ if __name__ == '__main__':
         'wordlist', help='Wordlist file path (1 word per line)')
     parser.add_argument('width', type=int, help='Grid width')
     parser.add_argument('height', type=int, help='Grid height')
+    parser.add_argument('--min-length', '-m', type=int, default=2,
+                        help='Mininum length of words to be taken into '
+                        'account')
+    parser.add_argument('--max-length', '-M', type=int, default=None,
+                        help='Maximum length of words to be taken into '
+                        'account (defaults to grid width)')
     parser.add_argument('--debug', '-d', action=argparse.BooleanOptionalAction,
                         help='Set logging level to logging.DEBUG')
 
@@ -335,6 +344,10 @@ if __name__ == '__main__':
         logging.basicConfig(level=logging.INFO)
 
     random.seed(42)
-    wordlist = WordList(args.wordlist, args.width)
+    wordlist = WordList(
+        args.wordlist,
+        max_length=args.max_length or args.width,
+        min_length=args.min_length
+    )
     grid = generate_grid(wordlist, args.width, args.height)
     print(grid)
