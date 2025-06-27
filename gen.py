@@ -35,6 +35,18 @@ class Grid:
         self.width, self.height = dimensions
         self.dimensions = dimensions
         self.error_out_of_bounds = error_out_of_bounds
+        self._immutable = False
+
+    @property
+    def immutable(self):
+        return self._immutable
+
+    @immutable.setter
+    def immutable(self, value):
+        if self._immutable:
+            raise TypeError(
+                "can't set attribute 'immutable' on immutable Grid")
+        self._immutable = value
 
     def __getitem__(self, pos):
         if isinstance(pos, tuple):
@@ -71,6 +83,9 @@ class Grid:
         return self.data[pos]
 
     def __setitem__(self, pos, value):
+        if self._immutable:
+            raise TypeError(
+                "can't modify an immutable Grid")
         if isinstance(pos, tuple):
             x, y = pos
             self.data[y][x] = value
@@ -131,6 +146,9 @@ class Grid:
         return 0 <= point[0] < self.width and 0 <= point[1] < self.height
 
     def set_if_not_none(self, pos, value):
+        if self._immutable:
+            raise TypeError(
+                "can't modify an immutable Grid")
         if pos not in self:
             if self.error_out_of_bounds:
                 raise ValueError(
@@ -217,17 +235,25 @@ class SolveAttempt:
     def __init__(self, wordlist, grid, x=0, y=0, columns_correct_words=None):
         self.wordlist = wordlist
         self.grid = grid
-        self.x = x
-        self.y = y
+        self._x = x
+        self._y = y
         if columns_correct_words is None:
-            self.columns_correct_words = [
-                set(wordlist) for _ in range(self.grid.width)
-            ]
+            self.columns_correct_words = tuple(
+                tuple(wordlist) for _ in range(self.grid.width)
+            )
         else:
             self.columns_correct_words = columns_correct_words
-        self.new_columns_correct_words = [set(words) for words in
+        self.new_columns_correct_words = [tuple(words) for words in
                                           self.columns_correct_words]
         self.correct_words = self.iter_correct_words()
+
+    @property
+    def y(self):
+        return self._y
+
+    @property
+    def x(self):
+        return self._x
 
     def last_word_from_line(self, line):
         for c in range(len(line) - 1, -1, -1):
@@ -294,17 +320,25 @@ class SolveAttempt:
         if end_x < self.grid.width - 1:
             # Adding BLOCK on next cell and advancing two cells
             self.grid[(end_x + 1, self.y)] = BLOCK
-            self.columns_correct_words[end_x + 1] = set(self.wordlist)
-            self.x = end_x + 2
+            self.columns_correct_words = tuple(
+                words if x != end_x + 1 else tuple(self.wordlist)
+                for x, words in enumerate(self.columns_correct_words)
+            )
+            self._x = end_x + 2
             if self.x >= self.grid.width:
-                self.x = 0
-                self.y += 1
+                self._x = 0
+                self._y += 1
         else:
             # end_x == width - 1, the word ends the line, let's continue
             # with the next line
-            self.x = 0
-            self.y += 1
+            self._x = 0
+            self._y += 1
             logger.debug('=== Going to next line')
+        # We only add one word per SolveAttempt, so we can now set
+        # grid.immutable to True, to ensure we don't inadvertently modify the
+        # grid. When we copy our grid (with Grid(self.grid) in self.copy),
+        # immutable status is lost.
+        self.grid.immutable = True
 
     def copy(self):
         return SolveAttempt(self.wordlist, Grid(self.grid), x=self.x, y=self.y,
