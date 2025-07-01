@@ -2,6 +2,7 @@
 
 import logging
 import os
+import pprint
 import random
 import re
 import string
@@ -11,13 +12,14 @@ import unicodedata
 
 logger = logging.getLogger(__name__)
 
+MINIMUM_MIN_LENGTH = 2
 BLOCK = '\N{BLACK SQUARE}'
 EMPTY = '\N{WHITE SQUARE}'
 
 
 class Grid:
     def __init__(self, data: typing.Iterable[typing.Iterable], dimensions=None,
-                 default=None, *, error_out_of_bounds=True, _trust_args=False):
+                 *, error_out_of_bounds=True, _trust_args=False):
         if _trust_args:
             # Bypass args processing, as we're called from an internal method.
             # Will be faster, thanks to not doing list(r) for r in data
@@ -66,10 +68,8 @@ class Grid:
             else:
                 x1, y1 = self.width, self.height
 
-            if x1 > self.width:
-                x1 = self.width
-            if y1 > self.height:
-                y1 = self.height
+            x1 = min(x1, self.width)
+            y1 = min(y1, self.height)
 
             if pos.step:
                 raise NotImplementedError('slices with steps unsupported')
@@ -77,7 +77,7 @@ class Grid:
             return Grid(
                 [self[y][x0:x1] for y in range(y0, y1)],
                 dimensions=(x1 - x0, y1 - y0),
-                error_out_of_bounds=self.error_out_of_bounds, _trust_args=True
+                error_out_of_bounds=self.error_out_of_bounds, _trust_args=True,
             )
 
         return self.data[pos]
@@ -101,7 +101,7 @@ class Grid:
                                              or y1 > self.height):
                 raise ValueError(
                     f'slice {pos} does not fit in grid of dimensions '
-                    f'{self.dimensions}'
+                    f'{self.dimensions}',
                 )
             w = x1 - x0
             h = y1 - y0
@@ -110,7 +110,7 @@ class Grid:
                 raise ValueError(
                     f'value {value} is not of the right size for slice {pos}')
 
-            for y, raw_row in zip(range(y0, y1), reversed(value)):
+            for y, raw_row in zip(range(y0, y1), reversed(value), strict=True):
                 row = list(raw_row)
                 if len(raw_row) > w:
                     if self.error_out_of_bounds:
@@ -133,7 +133,6 @@ class Grid:
         )
 
     def __repr__(self):
-        import pprint
         lines = pprint.pformat(self.data).splitlines()
         if len(lines) == 1:
             return f'{self.__class__.__qualname__}({lines[0]})'
@@ -161,9 +160,9 @@ class Grid:
 
     def transpose(self):
         return Grid(
-            [list(r) for r in zip(*self.data)],
+            [list(r) for r in zip(*self.data, strict=True)],
             dimensions=(self.height, self.width),
-            error_out_of_bounds=self.error_out_of_bounds, _trust_args=True
+            error_out_of_bounds=self.error_out_of_bounds, _trust_args=True,
         )
 
     def neighbors(self, pos):
@@ -179,14 +178,21 @@ class Grid:
 class WordList:
     def __init__(self, words: os.PathLike | str | list, max_length=8,
                  min_length=2):
+        if min_length < MINIMUM_MIN_LENGTH:
+            raise ValueError(
+                f'min_length should be at least {MINIMUM_MIN_LENGTH}')
+
         if isinstance(words, (os.PathLike, str)):
-            with open(words, "r") as f:
+            with open(words, 'r') as f:
                 words = [
                     word for line in f.readlines()
                     if (min_length
                         <= len(word := self.clean(line.strip()))
                         <= max_length)
                 ]
+
+        self.min_length = min_length
+        self.max_length = max_length
 
         random.shuffle(words)
         self._length = len(words)
@@ -200,11 +206,11 @@ class WordList:
 
     @staticmethod
     def clean(word):
-        """Clean word, so that it only contains unaccented latin letters"""
+        """Clean word, so that it only contains unaccented latin letters."""
         # Remove accents
         word = unicodedata.normalize('NFD', word)
         word = word.encode('ascii', 'ignore')
-        word = word.decode("utf-8")
+        word = word.decode('utf-8')
         word = word.lower()
         word, _ = re.subn(r'[^a-z]', '', word)
 
@@ -225,7 +231,7 @@ class WordList:
         return self._length
 
     def __contains__(self, word):
-        if len(word) < 2:
+        if len(word) < self.min_length:
             return False
         l1, l2 = word[:2]
         return word in self._words[l1][l2]
@@ -334,6 +340,7 @@ class SolveAttempt:
             self._x = 0
             self._y += 1
             logger.debug('=== Going to next line')
+
         # We only add one word per SolveAttempt, so we can now set
         # grid.immutable to True, to ensure we don't inadvertently modify the
         # grid. When we copy our grid (with Grid(self.grid) in self.copy),
@@ -348,7 +355,7 @@ class SolveAttempt:
 def generate_grid(wordlist, width, height):
     attempt = SolveAttempt(
         wordlist,
-        Grid([[EMPTY for _ in range(width)] for _ in range(height)])
+        Grid([[EMPTY for _ in range(width)] for _ in range(height)]),
     )
     return attempt.recurse()
 
@@ -381,7 +388,7 @@ if __name__ == '__main__':
     wordlist = WordList(
         args.wordlist,
         max_length=args.max_length or args.width,
-        min_length=args.min_length
+        min_length=args.min_length,
     )
     grid = generate_grid(wordlist, args.width, args.height)
     print(grid)
